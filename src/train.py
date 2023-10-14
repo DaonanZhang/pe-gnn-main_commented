@@ -37,6 +37,7 @@ def train(args):
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
   # Access and process data
+  # from data_utils
   if dset=="cali_housing":
     c,x,y = get_cali_housing_data()
   if dset=="election":
@@ -47,6 +48,7 @@ def train(args):
     c,x,y = get_3d_road_data()
     x = torch.ones(y.shape[0],1)
 
+  # devided data into train and test   but where is dev set?
   n = x.shape[0]
   n_train = np.round(n * train_size).astype(int)
   n_test = (n - n_train).astype(int)
@@ -57,14 +59,20 @@ def train(args):
   train_y, test_y = y[idx_train], y[idx_test]
   train_c, test_c = c[idx_train], c[idx_test]
   train_dataset, test_dataset = MyDataset(train_x, train_y, train_c), MyDataset(test_x, test_y, test_c)
-  
+
+  # do not enable batched training for now
   if batched_training==False:
+    # build the graph
     batch_size = len(idx_train)
     train_edge_index = knn_graph(train_c, k=k).to(device)
     train_edge_weight = makeEdgeWeight(train_c, train_edge_index).to(device)
     test_edge_index = knn_graph(test_c, k=k).to(device)
     test_edge_weight = makeEdgeWeight(test_c, test_edge_index).to(device)
     train_moran_weight_matrix = knn_to_adj(train_edge_index, batch_size) #libpysal.weights.KNN(batch_y.cpu(), k=20).to(device)
+
+    # torch.enable_grad() 是 PyTorch 中的一个上下文管理器（context manager），用于在特定范围内启用梯度计算。在深度学习中，通常使用梯度计算来训练模型，
+    # 通过反向传播算法来更新模型参数以最小化损失函数。然而，并非所有的操作都需要计算梯度，因为这会增加计算的开销。
+    # 因此，PyTorch 提供了 torch.enable_grad() 来允许在需要计算梯度的部分启用梯度计算，并在不需要计算梯度的部分禁用梯度计算，以提高效率。
     with torch.enable_grad():
       train_y_moran = lw_tensor_local_moran(train_y, sparse.csr_matrix(train_moran_weight_matrix)).to(device)
     train_loader = DataLoader(train_dataset, batch_size = batch_size, shuffle=False, drop_last=False)
@@ -89,6 +97,7 @@ def train(args):
     task_num = 1
 
   loss_wrapper = LossWrapper(model, task_num=task_num, loss=train_crit, uw=uw, lamb=lamb, k=k, batch_size=batch_size).to(device)
+  # learning rate: lr
   optimizer = torch.optim.Adam(loss_wrapper.parameters(), lr=lr)
   score1 = nn.MSELoss()
   score2 = nn.L1Loss()

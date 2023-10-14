@@ -531,8 +531,11 @@ class LossWrapper(nn.Module):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = model
         self.task_num = task_num
+        # unweighted loss
         self.uw = uw
+        # regularization parameter
         self.lamb = lamb
+        # k neightbors
         self.k = k
         self.batch_size = batch_size
         # if task_num > 1:：这个条件判断语句检查task_num是否大于1，即是否存在多个任务。如果存在多个任务（task_num大于1），则执行下面的代码块。
@@ -552,6 +555,7 @@ class LossWrapper(nn.Module):
     def forward(self, input, targets, coords, edge_index, edge_weight, morans_input):
 
         if self.task_num==1:
+          #   这可能意味着模型被配置为执行单一任务学习，例如回归或分类。在这种情况下，模型的输出是一个一维张量，表示模型的预测值。
           outputs = self.model(input, coords, edge_index, edge_weight)
           """
              self.criterion 是在初始化 LossWrapper 类时选择的损失函数，它可以是均方误差（MSE）损失函数或平均绝对误差（L1）损失函数，具体取决于 loss 参数的值。
@@ -561,7 +565,12 @@ class LossWrapper(nn.Module):
              最后，self.criterion 接受这两个一维张量作为输入，计算它们之间的损失值。这个损失值表示模型的预测与实际目标之间的差异，它是一个衡量模型性能的关键指标。在训练过程中，通过反向传播和优化算法来最小化这个损失，从而不断改善模型的预测能力。"""
           loss = self.criterion(targets.float().reshape(-1),outputs.float().reshape(-1))
           return loss
-
+        # 如果task_num大于1，这意味着模型被配置为执行多任务学习，例如同时执行回归和分类任务。在这种情况下，模型的输出是一个元组，其中包含了多个任务的预测值。
+        # 这个元组的长度等于任务数量（task_num），每个元素都是一个一维张量，表示模型对当前任务的预测值。
+        # 这种情况下，损失函数的计算过程与单任务学习有所不同，需要对每个任务的预测值和目标值分别计算损失，然后将这些损失加权求和作为最终的损失值。
+        # 这里的权重是通过 self.log_vars 参数来控制的，它是一个长度为 task_num 的向量，其中每个元素都是一个可训练参数，用于调整对应任务的损失权重或方差。
+        # 这个权重参数的初始值都设置为零，因此在训练过程中，这些参数会随着损失的变化而不断更新，从而调整不同任务的损失权重或方差。
+        # 这种损失函数的计算方式通常用于多任务学习，它可以帮助模型同时学习多个任务，从而提高模型的泛化能力。
         else:
           outputs1, outputs2 = self.model(input, coords, edge_index, edge_weight)
           if torch.is_tensor(morans_input):
@@ -569,8 +578,10 @@ class LossWrapper(nn.Module):
           else:
             moran_weight_matrix = knn_to_adj(knn_graph(coords, k=self.k), self.batch_size) 
             with torch.enable_grad():
+              # 这个函数用于计算局部莫兰指数，并根据需要对其进行归一化和处理 NaN 值。局部莫兰指数通常用于空间统计分析，用于衡量地理空间数据的空间自相关性。
               targets2 = lw_tensor_local_moran(targets, sparse.csr_matrix(moran_weight_matrix)).to(self.device)
           if self.uw:
+            #   to calculate the unweighted loss
             precision1 = 0.5 * torch.exp(-self.log_vars[0])
             loss1 = self.criterion(targets.float().reshape(-1),outputs1.float().reshape(-1))
             loss1 = torch.sum(precision1 * loss1 + self.log_vars[0], -1)
@@ -583,6 +594,8 @@ class LossWrapper(nn.Module):
             loss = torch.mean(loss)
             return loss, self.log_vars.data.tolist()
           else:
+
+            # weighted loss
             loss1 = self.criterion(targets.float().reshape(-1),outputs1.float().reshape(-1))
             loss2 = self.criterion(targets2.float().reshape(-1),outputs2.float().reshape(-1))
             loss = loss1 + self.lamb * loss2
