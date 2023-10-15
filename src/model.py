@@ -15,11 +15,14 @@ from spatial_utils import *
 
 class LayerNorm(nn.Module):
     """
+    ？？？ this is batch normalization
     layer normalization
     Simple layer norm object optionally used with the convolutional encoder.
     """
 
     def __init__(self, feature_dim, eps=1e-6):
+        # feature_dim: the dimention of the input feature
+        # batch normalization is used in the hidden layer, layer normalization is used in the last layer
         super(LayerNorm, self).__init__()
         self.gamma = nn.Parameter(torch.ones((feature_dim,)))
         self.register_parameter("gamma", self.gamma)
@@ -29,12 +32,11 @@ class LayerNorm(nn.Module):
 
     def forward(self, x):
         # x: [batch_size, embed_dim]
-        # normalize for each embedding
+        # normalize for each embedding node
         mean = x.mean(-1, keepdim=True)
         std = x.std(-1, keepdim=True)
-        # output shape is the same as x
-        # Type not match for self.gamma and self.beta??????????????????????
-        # output: [batch_size, embed_dim]
+
+        # batch normalization
         return self.gamma * (x - mean) / (std + self.eps) + self.beta
 
 def get_activation_function(activation, context_str):
@@ -108,7 +110,7 @@ class SingleFeedForwardNN(nn.Module):
 
         self.act = get_activation_function(activation, context_str)
 
-        # NLP：
+        # NLP: most common used
         #
         if use_layernormalize:
             # the layer normalization is only used in the hidden layer, not the last layer
@@ -239,7 +241,12 @@ class MultiLayerFeedForwardNN(nn.Module):
                                                     skip_connection = self.skip_connection,
                                                     context_str = self.context_str))
 
+            # useful to create a model with multiple hidden layers
             for i in range(self.num_hidden_layers-1):
+                # if i == self.num_hidden_layers
+                # self.use_layernormalize = False
+                # self.skip_connection = False
+                # to rise the reuse of code
                 self.layers.append( SingleFeedForwardNN(input_dim = self.hidden_dim,
                                                     output_dim = self.hidden_dim,
                                                     dropout_rate = self.dropout_rate,
@@ -248,6 +255,7 @@ class MultiLayerFeedForwardNN(nn.Module):
                                                     skip_connection = self.skip_connection,
                                                     context_str = self.context_str))
 
+            # output layer so that Use_LayerNorm is always False and Skip_Connection is always False
             self.layers.append( SingleFeedForwardNN(input_dim = self.hidden_dim,
                                                     output_dim = self.output_dim,
                                                     dropout_rate = self.dropout_rate,
@@ -286,7 +294,6 @@ class MultiLayerFeedForwardNN(nn.Module):
     如果 freq_init 是 "geometric"，则函数会生成一个几何级数的频率列表。它首先计算出一组等比数列的频率值，从 min_radius 到 max_radius，然后将这些频率值的倒数作为频率列表中的值。
     最终，函数会返回生成的频率列表 freq_list，该列表包含了根据输入参数计算得到的一组频率值。这个频率列表通常用于后续的空间关系编码过程中，以捕获不同尺度或频率的空间信息。
     """
-
 def _cal_freq_list(freq_init, frequency_num, max_radius, min_radius):
     if freq_init == "random":
         freq_list = np.random.random(size=[frequency_num]) * max_radius
@@ -353,6 +360,7 @@ class GridCellSpatialRelationEncoder(nn.Module):
         '''
         return coord/(np.power(self.max_radius, cur_freq*1.0/(self.frequency_num-1)))
 
+    # to calculate the embedding of the spatial relation
     def cal_coord_embed(self, coords_tuple):
         embed = []
         for coord in coords_tuple:
@@ -439,12 +447,15 @@ class GCN(nn.Module):
         if MAT:
           self.fc_morans = nn.Linear(32, num_features_out)
     def forward(self, x, c, ei, ew):
+        # The "convolutional kernel" in a GCN is not a fixed filter as in traditional CNNs.
+        # Instead, it's a learned weight matrix that defines how information from neighboring nodes is combined during the aggregation step.
         x = x.float()
         c = c.float()
         if torch.is_tensor(ei) & torch.is_tensor(ew):
           edge_index = ei
           edge_weight = ew
         else:
+          #to calculate the edge index and edge weight manually
           edge_index = knn_graph(c, k=self.k).to(self.device)
           edge_weight = makeEdgeWeight(c, edge_index).to(self.device)
 
@@ -508,7 +519,7 @@ class PEGCN(nn.Module):
         emb = self.spenc(c.detach().cpu().numpy())
         emb = emb.reshape(emb.shape[1],emb.shape[2])
         emb = self.dec(emb).float()
-        # 这行代码的目的可能是将坐标嵌入（emb）与原始输入特征（x）组合在一起，以便在后续的神经网络层中一起进行处理。这种操作常见于将多个输入源合并成一个输入张量的情况，以供神经网络进行联合学习。
+        # 这行代码的目的是将坐标嵌入（emb）与原始输入特征（x）组合在一起，以便在后续的神经网络层中一起进行处理。这种操作常见于将多个输入源合并成一个输入张量的情况，以供神经网络进行联合学习。
         x = torch.cat((x,emb),dim=1)
 
 
